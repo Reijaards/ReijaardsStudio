@@ -70,13 +70,15 @@ header{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(-
 #heads{width:150px;flex:0 0 150px;background:var(--bg2);border-right:1px solid var(--line);overflow:hidden;position:relative}
 #heads .rul{position:relative;z-index:2;background:var(--bg2);height:26px;border-bottom:1px solid var(--line);font-size:11px;color:var(--mut);display:flex;align-items:center;padding-left:8px}
 #headsIn{position:absolute;left:0;right:0;top:26px}
-.th{height:64px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:4px;padding:0 6px 0 10px;position:relative;cursor:pointer}
+.th{height:var(--th,64px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:4px;padding:0 6px 0 10px;position:relative;cursor:pointer}
 .th::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c)}
 .th.sel{background:var(--bg4)}
 .th.sel::after{content:"";position:absolute;right:0;top:0;bottom:0;width:3px;background:var(--acc)}
 .th .tn{flex:1;min-width:0}
 .th .tn b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .th .tn small{font-size:11px}
+#headsIn.compact .th .tn small{display:none}
+#headsIn.compact .th button{min-height:22px;height:22px}
 .th button{min-height:28px;width:28px;padding:0;font-size:12px;border-radius:6px}
 .th button.on.solo{background:var(--ok);border-color:var(--ok)}
 #lane{flex:1;position:relative;min-width:0}
@@ -204,6 +206,9 @@ header{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(-
     <button data-tool="snap" id="btnSnap" class="on">Raster</button>
     <button data-tool="zoomOut">−</button>
     <button data-tool="zoomIn">+</button>
+    <button data-tool="overview" id="btnOverview">Overzicht</button>
+    <button data-tool="rowsDn" title="Sporen lager">↕−</button>
+    <button data-tool="rowsUp" title="Sporen hoger">↕+</button>
   </div>
   <div id="arrBody">
     <div id="heads"><div class="rul">Sporen</div><div id="headsIn"></div></div>
@@ -604,7 +609,7 @@ function tool(name){
   case'addInst':chooseInstrument();break;
   case'undo':undo();break;
   case'snap':S.snap=!S.snap;$('#btnSnap').classList.toggle('on',S.snap);break;
-  case'zoomIn':zoom(1.4);break;case'zoomOut':zoom(1/1.4);break;
+  case'zoomIn':zoom(1.4);break;case'zoomOut':zoom(1/1.4);break;case'overview':overview();break;case'rowsDn':setTH(TH-10);break;case'rowsUp':setTH(TH+10);break;
   default:
    if(!fc){toast('Tik eerst een clip aan in de tijdlijn');return}
    const{t,c}=fc;
@@ -623,7 +628,12 @@ function tool(name){
  uiClip();renderHeads();renderMix();S.dirty=true;save();
 }
 function addTrack(t){if(S.recording)return;pushUndo();S.tracks.push(t);S.selTrack=t.id;if(t.type==='inst')S.lastInst=t.id;if(ctx)getNodes(t);renderAll();save();const lane=$('#lane');S.scrollY=Math.max(0,S.tracks.length*TH+RUL-lane.clientHeight)}
-function zoom(f){const w=$('#lane').clientWidth;const center=(S.scrollX+w/2)/S.zoom;S.zoom=clamp(S.zoom*f,12,400);S.scrollX=Math.max(0,center*S.zoom-w/2);S.dirty=true}
+function setTH(v){TH=Math.round(clamp(v,28,110));S.th=TH;const hi=$('#headsIn');hi.style.setProperty('--th',TH+'px');hi.classList.toggle('compact',TH<50);S.dirty=true;save()}
+let preOverview=null;
+function overview(){const lane=$('#lane'),w=lane.clientWidth,h=lane.clientHeight;
+ if(preOverview){const p=preOverview;preOverview=null;S.zoom=p.zoom;setTH(p.th);S.scrollX=p.sx;S.scrollY=p.sy;$('#btnOverview').classList.remove('on');S.dirty=true;return}
+ preOverview={zoom:S.zoom,th:TH,sx:S.scrollX,sy:S.scrollY};const len=Math.max(songLen(),contentEnd()+barDur()*.25,barDur());S.zoom=clamp((w-16)/len,2,400);setTH((h-RUL-4)/Math.max(1,S.tracks.length));S.scrollX=0;S.scrollY=0;$('#btnOverview').classList.add('on');toast('Overzicht – tik nog eens op Overzicht om terug te gaan',2500)}
+function zoom(f,cx){const w=$('#lane').clientWidth;if(cx==null)cx=w/2;const center=(S.scrollX+cx)/S.zoom;S.zoom=clamp(S.zoom*f,2,400);if(preOverview){preOverview=null;$('#btnOverview').classList.remove('on')}S.scrollX=Math.max(0,center*S.zoom-cx);S.dirty=true}
 function chooseInstrument(){sheet(`<h2>Instrument kiezen</h2><div class="chips">${MEL_IDS.map(id=>`<button data-v="${id}">${SOUNDS[id].n}</button>`).join('')}</div><div class="row"><button data-v="x">Annuleren</button></div>`,(v,close)=>{close();if(v==='x')return;addTrack(newTrack('inst',v))})}
 
 /* ================= Peaks ================= */
@@ -632,7 +642,7 @@ function peaksOf(buf){let p=peakCache.get(buf);if(p)return p;const N=256,ch=buf.
 function clipPeak(c){const p=peaksOf(c.buf),sr=c.buf.sampleRate;let m=0;const a=Math.floor(c.offset*sr/256),b=Math.ceil((c.offset+(c.loop||c.dur))*sr/256);for(let i=a;i<b&&i<p.length;i++)m=Math.max(m,p[i]);return m}
 
 /* ================= Tijdlijn ================= */
-const TH=64,RUL=26;const cv=$('#tl'),g2=cv.getContext('2d');let dpr=1;
+let TH=64;const RUL=26;const cv=$('#tl'),g2=cv.getContext('2d');let dpr=1;
 function drawTL(){
  const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;dpr=window.devicePixelRatio||1;if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr)}
  const g=g2;g.setTransform(dpr,0,0,dpr,0,0);g.fillStyle='#14110f';g.fillRect(0,0,w,h);
@@ -666,8 +676,10 @@ function drawClip(g,t,c,x,y,w,h,vw){
  g.restore();
 }
 function hitClip(px,py){const i=Math.floor((py-RUL+S.scrollY)/TH);const t=S.tracks[i];if(!t)return{ti:i};const time=(px+S.scrollX)/S.zoom;for(let k=t.clips.length-1;k>=0;k--){const c=t.clips[k];const ex=(c.start+c.dur)*S.zoom-S.scrollX;if(Math.abs(px-ex)<16&&c.dur*S.zoom>24)return{t,c,ti:i,edge:true}}for(let k=t.clips.length-1;k>=0;k--){const c=t.clips[k];if(time>=c.start&&time<=c.start+Math.max(c.dur,3/S.zoom))return{t,c,ti:i}}return{t,ti:i}}
-let drag=null;
-cv.addEventListener('pointerdown',e=>{
+let drag=null;const ptrs=new Map();let pinch=null;
+function pinchInfo(){const[a,b]=[...ptrs.values()];const r=cv.getBoundingClientRect();return{dx:Math.abs(a.x-b.x),dy:Math.abs(a.y-b.y),mx:(a.x+b.x)/2-r.left,my:(a.y+b.y)/2-r.top}}
+cv.addEventListener('pointerdown',e=>{ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+ if(ptrs.size===2){const i=pinchInfo();pinch={...i,zoom:S.zoom,th:TH,sx:S.scrollX,sy:S.scrollY,vert:i.dy>i.dx*1.3};drag=null;return}if(ptrs.size>2)return;
  const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;cv.setPointerCapture(e.pointerId);
  if(py<RUL){drag={mode:'scrub'};seek((px+S.scrollX)/S.zoom);return}
  const hc=hitClip(px,py);
@@ -675,16 +687,18 @@ cv.addEventListener('pointerdown',e=>{
  else drag={mode:'pan',x0:px,y0:py,sx:S.scrollX,sy:S.scrollY,moved:false,hc};
  S.dirty=true;
 });
-cv.addEventListener('pointermove',e=>{if(!drag)return;const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
+cv.addEventListener('pointermove',e=>{if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+ if(pinch&&ptrs.size===2){const i=pinchInfo();if(pinch.vert){const f=Math.max(20,i.dy)/Math.max(20,pinch.dy);TH=Math.round(clamp(pinch.th*f,28,110));setTH(TH)}else{const f=Math.max(20,i.dx)/Math.max(20,pinch.dx);const t=(pinch.sx+pinch.mx)/pinch.zoom;S.zoom=clamp(pinch.zoom*f,2,400);S.scrollX=Math.max(0,t*S.zoom-i.mx)}if(preOverview){preOverview=null;$('#btnOverview').classList.remove('on')}S.dirty=true;return}
+ if(!drag)return;const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
  if(drag.mode==='scrub'){seek((px+S.scrollX)/S.zoom);return}
  const dx=px-drag.x0,dy=py-drag.y0;if(!drag.moved&&Math.hypot(dx,dy)<7)return;drag.moved=true;
  if(drag.mode==='clip'||drag.mode==='edge'){if(!drag.undone){pushUndo();drag.undone=true}}
  if(drag.mode==='clip')drag.c.start=Math.max(0,snapT(drag.s0+dx/S.zoom));
  else if(drag.mode==='edge'){const c=drag.c;const nd=Math.max(.05,snapT(c.start+drag.d0+dx/S.zoom)-c.start);if(!drag.l0){if(nd>drag.d0+1e-6)c.loop=drag.d0;else delete c.loop}c.dur=nd}
  else{S.scrollX=Math.max(0,drag.sx-dx);S.scrollY=Math.max(0,drag.sy-dy)}S.dirty=true});
-const endDrag=()=>{if(!drag)return;if(drag.mode==='pan'&&!drag.moved){S.sel=null;uiClip();if(drag.hc.t)selectTrack(drag.hc.t.id);seek(Math.max(0,(drag.x0+S.scrollX)/S.zoom))}if((drag.mode==='clip'||drag.mode==='edge')&&drag.moved){save();uiClip()}drag=null;S.dirty=true};
+const endDrag=e=>{if(e&&e.pointerId!=null)ptrs.delete(e.pointerId);if(pinch){if(ptrs.size<2)pinch=null;drag=null;return}if(!drag)return;if(drag.mode==='pan'&&!drag.moved){S.sel=null;uiClip();if(drag.hc.t)selectTrack(drag.hc.t.id);seek(Math.max(0,(drag.x0+S.scrollX)/S.zoom))}if((drag.mode==='clip'||drag.mode==='edge')&&drag.moved){save();uiClip()}drag=null;S.dirty=true};
 cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
-cv.addEventListener('wheel',e=>{e.preventDefault();if(e.ctrlKey||e.metaKey){zoom(e.deltaY<0?1.15:1/1.15)}else{S.scrollX=Math.max(0,S.scrollX+(e.shiftKey?e.deltaY:e.deltaX));if(!e.shiftKey)S.scrollY=Math.max(0,S.scrollY+e.deltaY)}S.dirty=true},{passive:false});
+cv.addEventListener('wheel',e=>{e.preventDefault();if(e.ctrlKey||e.metaKey){zoom(e.deltaY<0?1.15:1/1.15,e.clientX-cv.getBoundingClientRect().left)}else{S.scrollX=Math.max(0,S.scrollX+(e.shiftKey?e.deltaY:e.deltaX));if(!e.shiftKey)S.scrollY=Math.max(0,S.scrollY+e.deltaY)}S.dirty=true},{passive:false});
 
 /* ================= UI ================= */
 function toast(m,ms=2600){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),ms)}
@@ -894,9 +908,9 @@ const DB={db:null,open(){if(this.db)return Promise.resolve(this.db);return new P
 const bufIds=new WeakMap();let saveT=null;
 function save(){clearTimeout(saveT);saveT=setTimeout(doSave,1200)}
 async function doSave(){if(S.recording){save();return}try{const bufs={};const tracks=S.tracks.map(t=>({...t,clips:t.clips.map(c=>{if(c.kind!=='audio')return c;let id=bufIds.get(c.buf);if(!id){id=uid();bufIds.set(c.buf,id)}if(!bufs[id]){const chs=[];for(let i=0;i<c.buf.numberOfChannels;i++)chs.push(c.buf.getChannelData(i));bufs[id]={sr:c.buf.sampleRate,chs}}const{buf,...rest}=c;return{...rest,bufId:id}})}));
- await DB.put('project',{v:1,bpm:S.bpm,bars:S.bars,metro:S.metro,countIn:S.countIn,loopMode:S.loopMode,loopA:S.loopA,loopB:S.loopB,padSens:S.padSens,autoQ:S.autoQ,qGrid:S.qGrid,qStr:S.qStr,autoTempo:S.autoTempo,lowLat:S.lowLat,liveMode:S.liveMode,arrH:S.arrH,beatGrid:S.beatGrid,mastering:S.mastering,masterVol:S.masterVol,revType:S.revType,latMs:S.latMs,inGainV:S.inGainV,a4:S.a4,micId:S.micId,selTrack:S.selTrack,tracks,bufs})}catch(e){console.warn('opslaan',e)}}
+ await DB.put('project',{v:1,bpm:S.bpm,bars:S.bars,metro:S.metro,countIn:S.countIn,loopMode:S.loopMode,loopA:S.loopA,loopB:S.loopB,padSens:S.padSens,autoQ:S.autoQ,qGrid:S.qGrid,qStr:S.qStr,autoTempo:S.autoTempo,lowLat:S.lowLat,th:TH,liveMode:S.liveMode,arrH:S.arrH,beatGrid:S.beatGrid,mastering:S.mastering,masterVol:S.masterVol,revType:S.revType,latMs:S.latMs,inGainV:S.inGainV,a4:S.a4,micId:S.micId,selTrack:S.selTrack,tracks,bufs})}catch(e){console.warn('opslaan',e)}}
 async function load(){try{const p=await DB.get('project');if(!p||!p.tracks)return false;const bufs={};for(const id in p.bufs){const b=p.bufs[id];const ab=new AudioBuffer({length:b.chs[0].length,numberOfChannels:b.chs.length,sampleRate:b.sr});b.chs.forEach((d,i)=>ab.copyToChannel(d,i));bufs[id]=ab;bufIds.set(ab,id)}
- Object.assign(S,{bpm:p.bpm,bars:p.bars,metro:p.metro,countIn:p.countIn,loopMode:!!p.loopMode,loopA:p.loopA||0,loopB:p.loopB||0,padSens:p.padSens==null?.7:p.padSens,autoQ:p.autoQ!==false,qGrid:p.qGrid||'16',qStr:p.qStr==null?1:p.qStr,autoTempo:p.autoTempo!==false,lowLat:p.lowLat!==false,liveMode:!!p.liveMode,arrH:p.arrH||0,beatGrid:p.beatGrid||'16',mastering:p.mastering,masterVol:p.masterVol,revType:p.revType||'studio',latMs:p.latMs,inGainV:p.inGainV||1.5,a4:p.a4||440,micId:p.micId||''});
+ Object.assign(S,{bpm:p.bpm,bars:p.bars,metro:p.metro,countIn:p.countIn,loopMode:!!p.loopMode,loopA:p.loopA||0,loopB:p.loopB||0,padSens:p.padSens==null?.7:p.padSens,autoQ:p.autoQ!==false,qGrid:p.qGrid||'16',qStr:p.qStr==null?1:p.qStr,autoTempo:p.autoTempo!==false,lowLat:p.lowLat!==false,th:p.th||64,liveMode:!!p.liveMode,arrH:p.arrH||0,beatGrid:p.beatGrid||'16',mastering:p.mastering,masterVol:p.masterVol,revType:p.revType||'studio',latMs:p.latMs,inGainV:p.inGainV||1.5,a4:p.a4||440,micId:p.micId||''});
  S.tracks=p.tracks.map(t=>({...t,clips:t.clips.map(c=>{if(c.kind!=='audio')return c;const{bufId,...rest}=c;return{...rest,buf:bufs[bufId]}}).filter(c=>c.kind!=='audio'||c.buf)}));S.selTrack=trackById(p.selTrack)?p.selTrack:S.tracks[0]&&S.tracks[0].id;return true}catch(e){console.warn('laden',e);return false}}
 function defaultProject(){S.tracks=[];S.bpm=90;S.bars=8;S.pos=0;S.sel=null;const a=newTrack('audio');S.tracks.push(a);const d=newTrack('inst','drums');S.tracks.push(d);const p=newTrack('inst','piano');S.tracks.push(p);const b=newTrack('inst','bass');b.name='Bas';S.tracks.push(b);S.selTrack=a.id;S.lastInst=d.id;if(ctx)S.tracks.forEach(getNodes)}
 
@@ -911,7 +925,7 @@ new ResizeObserver(()=>{S.dirty=true}).observe($('#lane'));
 (()=>{const sp=$('#split'),ar=$('#arrange');let on=false;sp.addEventListener('pointerdown',e=>{on=true;sp.setPointerCapture(e.pointerId)});sp.addEventListener('pointermove',e=>{if(!on)return;const h=clamp(e.clientY-ar.getBoundingClientRect().top,140,window.innerHeight-220);ar.style.flex=`0 0 ${h}px`;S.arrH=h;S.dirty=true});const up=()=>{if(on){on=false;save()}};sp.addEventListener('pointerup',up);sp.addEventListener('pointercancel',up)})();
 document.addEventListener('visibilitychange',()=>{if(document.hidden)doSave()});
 
-(async()=>{const ok=await load();if(!ok)defaultProject();if(S.arrH)$('#arrange').style.flex=`0 0 ${clamp(S.arrH,140,window.innerHeight-220)}px`;if(!S.lastInst){const f=S.tracks.find(t=>t.type==='inst');S.lastInst=f&&f.id}renderAll();requestAnimationFrame(frame);
+(async()=>{const ok=await load();if(!ok)defaultProject();if(S.th)setTH(S.th);if(S.arrH)$('#arrange').style.flex=`0 0 ${clamp(S.arrH,140,window.innerHeight-220)}px`;if(!S.lastInst){const f=S.tracks.find(t=>t.type==='inst');S.lastInst=f&&f.id}renderAll();requestAnimationFrame(frame);
  if('serviceWorker'in navigator&&location.protocol==='https:'&&!location.hostname.endsWith('claude.ai')&&!location.hostname.includes('claudeusercontent')){navigator.serviceWorker.register('sw.js').catch(()=>{})}})();
 })();
 </script>
