@@ -338,19 +338,19 @@ const PRESETS={
 const NEUTRAL={drive:0,cab:20000,low:0,body:0,mid:0,air:0,comp:0,width:0,gain:0};
 function makeGuitarChain(c){
  const g={};
- g.input=c.createGain();g.hp=bq(c,'highpass',75,.7);g.pre=c.createGain();g.ws=c.createWaveShaper();g.ws.oversample='4x';g.post=c.createGain();
+ g.input=c.createGain();g.hp=bq(c,'highpass',75,.7);g.pre=c.createGain();g.ws=c.createWaveShaper();g.post=c.createGain();
  g.cab=bq(c,'lowpass',18000,.7);g.cabPk=bq(c,'peaking',2400,1,0);g.low=bq(c,'lowshelf',120,null,0);g.body=bq(c,'peaking',220,1.1,0);g.mid=bq(c,'peaking',700,1.2,0);g.air=bq(c,'highshelf',7000,null,0);
  g.comp=c.createDynamicsCompressor();g.make=c.createGain();g.merge=c.createChannelMerger(2);g.dl=c.createDelay(.05);g.dl.delayTime.value=.014;g.dryR=c.createGain();g.wetR=c.createGain();g.output=c.createGain();
  [g.input,g.hp,g.pre,g.ws,g.post,g.cab,g.cabPk,g.low,g.body,g.mid,g.air,g.comp,g.make].reduce((a,b)=>(a.connect(b),b));
  g.make.connect(g.merge,0,0);g.make.connect(g.dryR);g.dryR.connect(g.merge,0,1);g.make.connect(g.dl);g.dl.connect(g.wetR);g.wetR.connect(g.merge,0,1);g.merge.connect(g.output);
- g.set=fx0=>{const fx=fx0.on===false?NEUTRAL:fx0;const a=fx.drive;g.pre.gain.value=1+a*8;g.ws.curve=driveCurve(a);g.post.gain.value=1/(1+a*4);g.cab.frequency.value=Math.min(fx.cab,c.sampleRate/2-100);g.cabPk.gain.value=a>.05?3:0;g.low.gain.value=fx.low;g.body.gain.value=fx.body;g.mid.gain.value=fx.mid;g.air.gain.value=fx.air;g.comp.threshold.value=-6-fx.comp*30;g.comp.ratio.value=1+fx.comp*7;g.comp.attack.value=.006;g.comp.release.value=.18;g.comp.knee.value=8;g.make.gain.value=db2g(fx.comp*9+fx.gain);g.dryR.gain.value=1-fx.width*.6;g.wetR.gain.value=fx.width*.85};
+ g.set=fx0=>{const fx=fx0.on===false?NEUTRAL:fx0;const a=fx.drive;g.pre.gain.value=1+a*8;if(a<.01){g.ws.curve=null;g.ws.oversample='none'}else{g.ws.curve=driveCurve(a);g.ws.oversample='2x'}g.post.gain.value=1/(1+a*4);g.cab.frequency.value=Math.min(fx.cab,c.sampleRate/2-100);g.cabPk.gain.value=a>.05?3:0;g.low.gain.value=fx.low;g.body.gain.value=fx.body;g.mid.gain.value=fx.mid;g.air.gain.value=fx.air;g.comp.threshold.value=-6-fx.comp*30;g.comp.ratio.value=1+fx.comp*7;g.comp.attack.value=.006;g.comp.release.value=.18;g.comp.knee.value=8;g.make.gain.value=db2g(fx.comp*9+fx.gain);g.dryR.gain.value=1-fx.width*.6;g.wetR.gain.value=fx.width*.85};
  return g;
 }
 
 /* ================= State ================= */
 const COLORS=['#e8a33d','#5aa9ff','#4cc38a','#e5484d','#a78bfa','#3dd6c6','#f2d33d','#ff7eb6'];
-const S={bpm:90,bars:8,tracks:[],selTrack:null,sel:null,pos:0,playing:false,recording:false,metro:false,countIn:true,loopMode:false,loopA:0,loopB:0,lp:null,padSens:.7,autoQ:true,qGrid:'16',qStr:1,autoTempo:true,lowLat:true,liveMode:false,arrH:0,beatGrid:'16',beatPage:0,beatClip:null,recLoop:false,recFree:false,recOverdub:false,snap:true,zoom:70,scrollX:0,scrollY:0,
- mastering:true,masterVol:.9,revType:'studio',latMs:null,inGainV:1.5,monitor:false,micId:'',a4:440,tab:'pads',lastInst:null,dirty:true,
+const S={bpm:90,bars:8,tracks:[],selTrack:null,sel:null,pos:0,playing:false,recording:false,metro:false,countIn:true,loopMode:false,loopA:0,loopB:0,lp:null,padSens:.7,autoQ:true,qGrid:'16',qStr:1,autoTempo:true,bufMode:'auto',outId:'',liveMode:false,arrH:0,beatGrid:'16',beatPage:0,beatClip:null,recLoop:false,recFree:false,recOverdub:false,snap:true,zoom:70,scrollX:0,scrollY:0,
+ mastering:true,masterVol:.9,revType:'studio',latMs:null,inGainV:1,monitor:false,micId:'',a4:440,tab:'pads',lastInst:null,dirty:true,
  p0:0,t0:0,schedTo:0,srcs:[],voices:[],timer:null,recFrom:0,recTrack:null,recClip:null};
 let ctx=null,M=null;const NODES=new Map();
 
@@ -383,6 +383,7 @@ function findClip(){if(!S.sel)return null;const t=trackById(S.sel.tid);if(!t)ret
 
 /* ================= Audio graph ================= */
 function makeIR(c,type){const P={studio:[.75,.008,.5],plaat:[1.9,.003,.35],zaal:[3.4,.022,.22]}[type]||[.75,.008,.5];const[dur,pre,br]=P;const sr=c.sampleRate,len=Math.floor(sr*dur),b=c.createBuffer(2,len,sr);for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);let lp=0;const pn=Math.floor(pre*sr);for(let i=pn;i<len;i++){const x=(i-pn)/(len-pn);const env=Math.pow(1-x,2)*Math.exp(-x*3.2);const a=br*(1-x*.85)+.04;lp+=a*((Math.random()*2-1)-lp);d[i]=lp*env}if(type==='studio'){[.011,.017,.023,.031].forEach((t,k)=>{const i=Math.floor((t+ch*.002)*sr);if(i<len)d[i]+=.5/(k+1)})}}return b}
+let _safe=null;function safeCurve(){if(_safe)return _safe;const N=4096,cv=new Float32Array(N);for(let i=0;i<N;i++){const x=(i/(N-1)*2-1)*1.5,a=Math.abs(x);cv[i]=Math.sign(x)*(a<.85?a:.85+.15*Math.tanh((a-.85)/.15))}return _safe=cv}
 function compN(c,th,ra,at,re,kn){const k=c.createDynamicsCompressor();k.threshold.value=th;k.ratio.value=ra;k.attack.value=at;k.release.value=re;k.knee.value=kn;return k}
 function buildMaster(c){
  const m={c};m.in=c.createGain();
@@ -390,7 +391,7 @@ function buildMaster(c){
  m.dlyIn=c.createDelay(2.5);m.dlyLp=bq(c,'lowpass',3200,.7);m.fb=c.createGain();m.fb.gain.value=.36;m.dlyIn.connect(m.dlyLp);m.dlyLp.connect(m.fb);m.fb.connect(m.dlyIn);m.dlyLp.connect(m.in);
  m.glue=compN(c,-16,2.5,.02,.25,8);m.mk=c.createGain();m.mk.gain.value=db2g(3);m.lim=compN(c,-1.5,20,.002,.1,0);m.on=c.createGain();m.off=c.createGain();
  m.in.connect(m.glue);m.glue.connect(m.mk);m.mk.connect(m.lim);m.lim.connect(m.on);m.in.connect(m.off);
- m.out=c.createGain();m.on.connect(m.out);m.off.connect(m.out);m.an=c.createAnalyser();m.an.fftSize=1024;m.out.connect(m.an);m.out.connect(c.destination);
+ m.out=c.createGain();m.on.connect(m.out);m.off.connect(m.out);m.an=c.createAnalyser();m.an.fftSize=1024;m.sc=c.createWaveShaper();m.sc.curve=safeCurve();m.out.connect(m.sc);m.sc.connect(m.an);m.sc.connect(c.destination);
  applyMaster(m);return m;
 }
 function applyMaster(m){if(!m)return;const off=typeof OfflineAudioContext!=='undefined'&&m.c instanceof OfflineAudioContext;const mast=S.mastering&&(off||!S.liveMode);m.on.gain.value=mast?1:0;m.off.gain.value=mast?0:1;m.out.gain.value=S.masterVol;m.dlyIn.delayTime.value=Math.min(2.4,spb()*.75)}
@@ -404,12 +405,14 @@ function buildTrack(c,t,m){
 }
 function audible(t){const solo=S.tracks.some(x=>x.solo);return !t.mute&&(!solo||t.solo)}
 function applyNodes(n,t,c){const on=audible(t)?1:0;n.vol.gain.value=t.vol*on;n.pan.pan.value=t.pan;n.rs.gain.value=t.rev;n.ds.gain.value=t.dly;
- if(t.type==='audio')n.g.set(t.fx);else{n.f.frequency.value=Math.min(180*Math.pow(110,t.fx.cutoff),c.sampleRate/2-100);n.ws.curve=driveCurve(t.fx.drive);n.pg.gain.value=1/(1+t.fx.drive*2)}}
+ if(t.type==='audio')n.g.set(t.fx);else{n.f.frequency.value=Math.min(180*Math.pow(110,t.fx.cutoff),c.sampleRate/2-100);n.ws.curve=t.fx.drive<.01?null:driveCurve(t.fx.drive);n.pg.gain.value=1/(1+t.fx.drive*2)}}
 function getNodes(t){if(!ctx)return null;let n=NODES.get(t.id);if(!n){n=buildTrack(ctx,t,M);NODES.set(t.id,n)}return n}
 function applyTrack(t){const n=ctx&&NODES.get(t.id);if(n)applyNodes(n,t,ctx)}
 function applyAll(){S.tracks.forEach(applyTrack);applyMaster(M)}
+let ctxHint=null;
+function hintFor(){const m=S.bufMode;return m==='low'?0:m==='normal'?'interactive':m==='stable'?'balanced':(mic.stream||mic.want)?'balanced':0}
 function ensureCtx(){
- if(!ctx){const AC=window.AudioContext||window.webkitAudioContext;try{ctx=new AC({latencyHint:S.lowLat?0:'interactive'})}catch(_){ctx=new AC({latencyHint:'interactive'})}M=buildMaster(ctx);S.tracks.forEach(getNodes);
+ if(!ctx){const AC=window.AudioContext||window.webkitAudioContext;ctxHint=hintFor();try{ctx=new AC({latencyHint:ctxHint})}catch(_){ctx=new AC({latencyHint:'interactive'})}if(S.outId&&ctx.setSinkId)ctx.setSinkId(S.outId).catch(()=>{S.outId=''});M=buildMaster(ctx);S.tracks.forEach(getNodes);
   if(S.latMs==null)S.latMs=Math.round(((ctx.baseLatency||0)+(ctx.outputLatency||0))*1000)+20;}
  if(ctx.state!=='running')ctx.resume();return ctx;
 }
@@ -485,20 +488,23 @@ registerProcessor('rs-rec',R);`;
 const mic={stream:null,src:null,gain:null,an:null,mon:null,monTarget:null};
 const rec={on:false,chunks:[],firstT:null,endRes:null,node:null,sp:null};
 async function micOn(){
- ensureCtx();if(mic.stream)return true;
+ if(mic.stream){ensureCtx();return true}mic.want=true;ensureCtx();if(ctxHint!==hintFor())await resetCtx();
  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){micError('Deze browser geeft geen toegang tot de microfoon.');return false}
  try{
   const cons={echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1};if(S.micId)cons.deviceId={exact:S.micId};
   mic.stream=await navigator.mediaDevices.getUserMedia({audio:cons});
- }catch(e){mic.stream=null;micError(e&&e.name==='NotAllowedError'?'De microfoon is hier geblokkeerd. Geef toestemming, of open Reijaards Studio via je eigen website-link (de voorbeeldweergave in Claude laat geen microfoon toe). Je kunt ook een opname importeren.':'Microfoon starten lukte niet: '+(e&&e.message||e));return false}
+ }catch(e){mic.stream=null;mic.want=false;micError(e&&e.name==='NotAllowedError'?'De microfoon is hier geblokkeerd. Geef toestemming, of open Reijaards Studio via je eigen website-link (de voorbeeldweergave in Claude laat geen microfoon toe). Je kunt ook een opname importeren.':'Microfoon starten lukte niet: '+(e&&e.message||e));return false}
  if(!mic.gain){mic.gain=ctx.createGain();mic.an=ctx.createAnalyser();mic.an.fftSize=2048;mic.mon=ctx.createGain();mic.gain.connect(mic.an);mic.gain.connect(mic.mon)}
  mic.gain.gain.value=S.inGainV;mic.src=ctx.createMediaStreamSource(mic.stream);mic.src.connect(mic.gain);routeMonitor();
- try{const devs=await navigator.mediaDevices.enumerateDevices();mic.devices=devs.filter(d=>d.kind==='audioinput')}catch(_){}
- renderRec();return true;
+ await listDevices();renderRec();return true;
 }
-async function rebuildAudio(){if(!ctx)return;if(S.playing)await stopTransport();const hadMic=!!mic.stream;micOff();try{await ctx.close()}catch(_){}ctx=null;M=null;NODES.clear();rec.node=null;rec.sp=null;mic.gain=null;mic.an=null;mic.mon=null;ensureCtx();if(hadMic)await micOn();renderRec()}
+async function resetCtx(){if(S.playing)await stopTransport();try{await ctx.close()}catch(_){}ctx=null;M=null;NODES.clear();rec.node=null;rec.sp=null;mic.gain=null;mic.an=null;mic.mon=null;ensureCtx()}
+async function rebuildAudio(){if(!ctx)return;const hadMic=!!mic.stream;micOff(true);await resetCtx();if(hadMic)await micOn();renderRec()}
 function outLatMs(){return ctx?Math.round(((ctx.baseLatency||0)+(ctx.outputLatency||0))*1000):null}
-function micOff(){if(mic.stream){mic.stream.getTracks().forEach(t=>t.stop());mic.stream=null}if(mic.src){try{mic.src.disconnect()}catch(_){}mic.src=null}renderRec()}
+function micOff(keep){if(mic.stream){mic.stream.getTracks().forEach(t=>t.stop());mic.stream=null}if(mic.src){try{mic.src.disconnect()}catch(_){}mic.src=null}if(!keep){mic.want=false;if(ctx&&ctxHint!==hintFor()&&!S.recording)resetCtx()}renderRec()}
+async function listDevices(){try{const d=await navigator.mediaDevices.enumerateDevices();mic.devices=d.filter(x=>x.kind==='audioinput'&&x.deviceId!=='default'&&x.deviceId!=='communications');mic.outs=d.filter(x=>x.kind==='audiooutput'&&x.deviceId!=='default'&&x.deviceId!=='communications')}catch(_){}}
+const isBT=l=>/bluetooth|bt |airpod|buds|headset|hands-?free|hfp|sco/i.test(l||'');
+if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener)navigator.mediaDevices.addEventListener('devicechange',async()=>{await listDevices();if(S.tab==='rec')renderRec()});
 function micError(m){toast(m,6000);const el=$('#micMsg');if(el){el.textContent=m;el.className='note warn'}}
 function routeMonitor(){if(!mic.mon)return;try{mic.mon.disconnect()}catch(_){}const t=monTrack();mic.mon.gain.value=S.monitor?1:0;if(t){mic.mon.connect(getNodes(t).in);mic.monTarget=t.id}}
 async function ensureRecNode(){
@@ -714,7 +720,7 @@ function uiTransport(){$('#btnPlay').classList.toggle('on',S.playing);$('#playIc
 let lastTime='';
 function updateTime(){const p=nowPos();let txt;if(p<0)txt='Aftellen '+(Math.floor(-p/spb())+1);else{const b=spb(),beats=p/b;txt=(Math.floor(beats/4)+1)+'.'+(Math.floor(beats)%4+1)+'.'+(Math.floor(beats*4)%4+1)}const s=Math.max(0,p);const sec=Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0')+'.'+Math.floor(s*10%10);const k=txt+sec;if(k!==lastTime){lastTime=k;$('#tBar').textContent=txt;$('#tSec').textContent=sec}}
 const mbuf=new Float32Array(1024);
-function meter(an,el){if(!an||!el)return;an.getFloatTimeDomainData(mbuf);let pk=0;for(let i=0;i<mbuf.length;i++){const a=Math.abs(mbuf[i]);if(a>pk)pk=a}const db=20*Math.log10(pk||1e-6);const w=clamp((db+48)/48,0,1)*100;el.style.width=w.toFixed(1)+'%'}
+function meter(an,el){if(!an||!el)return;an.getFloatTimeDomainData(mbuf);let pk=0;for(let i=0;i<mbuf.length;i++){const a=Math.abs(mbuf[i]);if(a>pk)pk=a}const db=20*Math.log10(pk||1e-6);el._pk=pk;const w=clamp((db+48)/48,0,1)*100;el.style.width=w.toFixed(1)+'%'}
 
 function slider(label,key,min,max,step,val,fmt){return`<label class="sl"><span>${label}</span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${val}"><output>${fmt(val)}</output></label>`}
 const fDb=v=>(v>0?'+':'')+(+v).toFixed(1)+' dB',fPct=v=>Math.round(v*100)+'%',fHz=v=>v>=1000?(v/1000).toFixed(1)+' kHz':Math.round(v)+' Hz',fPan=v=>Math.abs(v)<.02?'Midden':(v<0?'L ':'R ')+Math.round(Math.abs(v)*100);
@@ -757,13 +763,16 @@ $('#tab-mix').addEventListener('click',e=>{const b=e.target.closest('button');if
 function renderRec(){
  const el=$('#tab-rec');const on=!!mic.stream;const mt=monTrack();const st=selTrack();
  el.innerHTML=`<div class="card"><h3>Microfoon<span class="grow"></span><button data-act="mic" class="${on?'on':''}">${on?'Microfoon aan':'Microfoon aanzetten'}</button></h3>
- ${mic.devices&&mic.devices.length>1?`<select id="micSel"><option value="">Standaard microfoon</option>${mic.devices.map(d=>`<option value="${esc(d.deviceId)}" ${S.micId===d.deviceId?'selected':''}>${esc(d.label||'Microfoon')}</option>`).join('')}</select>`:''}
- <div class="inmeter"><i id="inMeter"></i></div>
+ <div class="inmeter"><i id="inMeter"></i></div><p id="clipWarn" class="note warn" style="margin:0;min-height:1em"></p>
  ${slider('Ingangsniveau','inGain',.2,6,.05,S.inGainV,FMT.inGain)}
  <p class="note">Speel je hardste aanslag: het balkje mag oranje worden, maar niet rood. Houd de tablet zo’n 20–30 cm van de gitaar, gericht op waar hals en klankkast samenkomen (rond de 12e fret).</p>
  <div class="row"><button data-act="monitor" class="${S.monitor?'on':''}">Meeluisteren ${S.monitor?'aan':'uit'}</button><small>${mt?'via klank van “'+esc(mt.name)+'”':''}</small></div>
  <p class="note">Alleen met koptelefoon meeluisteren, anders gaat het rondzingen.</p>
  <p id="micMsg" class="note"></p></div>
+ <div class="card"><h3>Geluidsbronnen</h3>
+ <label class="mini"><span>Ingang (microfoon)</span>${on||mic.devices?`<select id="micSel"><option value="">Standaard van het apparaat</option>${(mic.devices||[]).map(d=>`<option value="${esc(d.deviceId)}" ${S.micId===d.deviceId?'selected':''}>${esc(d.label||'Microfoon')}${isBT(d.label)?' (Bluetooth – lage kwaliteit)':''}</option>`).join('')}</select>`:'<small>Zet eerst de microfoon aan, dan verschijnt de lijst.</small>'}</label>
+ <label class="mini"><span>Uitgang (afspelen)</span>${(mic.outs&&mic.outs.length&&ctx&&ctx.setSinkId)?`<select id="outSel"><option value="">Standaard van het apparaat</option>${mic.outs.map(d=>`<option value="${esc(d.deviceId)}" ${S.outId===d.deviceId?'selected':''}>${esc(d.label||'Uitgang')}</option>`).join('')}</select>`:'<small>Wordt door het apparaat zelf gekozen (zie hieronder).</small>'}</label>
+ <p class="note">Op Android kiest het systeem zelf waar het geluid heen gaat: is een Bluetooth-koptelefoon verbonden, dan speelt alles daar af. Ontkoppel hem (of zet Bluetooth uit) en het geluid komt uit de speakers van de tablet. Kies bij Ingang de microfoon van de tablet zelf, niet die van de koptelefoon. <b>Let op:</b> zodra een app opneemt terwijl er een Bluetooth-koptelefoon verbonden is, schakelt Android die vaak naar een belstand met slechtere, krakerige klank en flink wat vertraging. Voor opnemen werkt een koptelefoon met draad het best. Anders kun je zonder koptelefoon opnemen en daarna via Bluetooth terugluisteren.</p></div>
  <div class="card"><h3>Opname-instellingen</h3>
  <p class="note">Opnemen gaat op het gekozen spoor: <b>${st?esc(st.name):'–'}</b>. ${st&&st.type==='inst'?'Dit is een padspoor: je pad-spel wordt opgenomen.':'Druk op ● bovenin om te starten, nog een keer (of ▶) om te stoppen.'}</p>
  ${slider('Vertraging-correctie','lat',0,500,1,S.latMs==null?0:S.latMs,FMT.lat)}
@@ -772,8 +781,8 @@ function renderRec(){
  <div class="row"><button data-act="import">Audiobestand importeren</button></div></div>
  <div class="card"><h3>Live spelen zonder vertraging</h3>
  <div class="row"><button data-act="liveMode" class="${S.liveMode?'on':''}">Live-modus ${S.liveMode?'aan':'uit'}</button><small>slaat tijdens het spelen de mastering over</small></div>
- <div class="row"><span>Geluidsbuffer</span><select id="lowLat"><option value="1" ${S.lowLat?'selected':''}>Zo kort mogelijk</option><option value="0" ${!S.lowLat?'selected':''}>Normaal (stabieler)</option></select></div>
- <p class="note">Vertraging van dit apparaat: <b>${ctx?outLatMs()+' ms':'tik eerst op een pad'}</b>. Onder de 30 ms voelt direct. <b>Bluetooth-koptelefoons en -speakers voegen 150–250 ms toe</b> – gebruik voor live drummen een koptelefoon met draad of de speaker van de tablet. Hoor je kraakjes, zet de buffer dan op Normaal. Je export krijgt altijd de volledige mastering.</p></div>
+ <div class="row"><span>Geluidsbuffer</span><select id="bufMode">${[['auto','Automatisch (aanbevolen)'],['low','Zo kort mogelijk'],['normal','Normaal'],['stable','Extra stabiel']].map(([v,n])=>`<option value="${v}" ${S.bufMode===v?'selected':''}>${n}</option>`).join('')}</select></div>
+ <p class="note">Vertraging van dit apparaat: <b>${ctx?outLatMs()+' ms':'tik eerst op een pad'}</b>. Onder de 30 ms voelt direct. <b>Bluetooth-koptelefoons en -speakers voegen 150–250 ms toe</b> – gebruik voor live drummen een koptelefoon met draad of de speaker van de tablet. Automatisch: zo kort mogelijk bij de pads, stabiel zodra de microfoon aan staat (je opnames worden voor die vertraging gecorrigeerd). Hoor je dan nog kraakjes, kies Extra stabiel. Je export krijgt altijd de volledige mastering.</p></div>
  <div class="card"><h3>Strak & tempo</h3>
  <div class="row"><button data-act="autoQ" class="${S.autoQ?'on':''}">Automatisch kwantiseren ${S.autoQ?'aan':'uit'}</button><select id="qGrid">${gridOpts()}</select></div>
  ${slider('Sterkte','qStr',0,1,.05,S.qStr,fPct)}
@@ -793,7 +802,8 @@ $('#tab-rec').addEventListener('click',e=>{const b=e.target.closest('button');if
  else if(a==='liveMode'){S.liveMode=!S.liveMode;applyMaster(M);renderRec();save();toast(S.liveMode?'Live-modus aan: pads klinken direct, mastering alleen in je export':'Live-modus uit')}
  else if(a==='import')$('#fileIn').click()});
 $('#tab-rec').addEventListener('input',e=>{const k=e.target.dataset.k;if(e.target.id==='a4'){S.a4=clamp(+e.target.value||440,400,480);save();return}if(!k)return;const v=+e.target.value;if(k==='inGain'){S.inGainV=v;if(mic.gain)mic.gain.gain.value=v}else if(k==='lat')S.latMs=v;else if(k==='qStr')S.qStr=v;e.target.nextElementSibling.textContent=FMT[k](v);save()});
-$('#tab-rec').addEventListener('change',async e=>{if(e.target.id==='micSel'){S.micId=e.target.value;micOff();await micOn()}if(e.target.id==='qGrid'){S.qGrid=e.target.value;renderPads();save()}if(e.target.id==='lowLat'){S.lowLat=e.target.value==='1';save();if(ctx){await rebuildAudio();toast('Geluidsbuffer aangepast – vertraging nu '+outLatMs()+' ms')}else toast('Opgeslagen – geldt zodra je gaat spelen')}});
+$('#tab-rec').addEventListener('change',async e=>{if(e.target.id==='micSel'){S.micId=e.target.value;micOff(true);await micOn()}if(e.target.id==='qGrid'){S.qGrid=e.target.value;renderPads();save()}if(e.target.id==='outSel'){S.outId=e.target.value;save();try{await ctx.setSinkId(S.outId);toast('Uitgang gewijzigd')}catch(err){S.outId='';toast('Deze uitgang kan hier niet gekozen worden');renderRec()}}
+ if(e.target.id==='bufMode'){S.bufMode=e.target.value;save();if(ctx){await rebuildAudio();toast('Geluidsbuffer aangepast – vertraging nu '+outLatMs()+' ms')}else toast('Opgeslagen – geldt zodra je gaat spelen')}});
 $('#fileIn').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;ensureCtx();try{const ab=await f.arrayBuffer();const buf=await ctx.decodeAudioData(ab);let t=selTrack();if(!t||t.type!=='audio'){t=newTrack('audio');t.name=f.name.replace(/\.[^.]+$/,'').slice(0,24);pushUndo();S.tracks.push(t);S.selTrack=t.id;getNodes(t)}else pushUndo();const c={id:uid(),kind:'audio',start:S.pos,offset:0,dur:buf.duration,buf,gain:1};t.clips.push(c);S.sel={tid:t.id,cid:c.id};renderAll();save();toast('Geïmporteerd: '+f.name)}catch(err){toast('Dit bestand kan niet worden gelezen')}});
 
 function renderAll(){renderBeat();renderHeads();renderPads();renderSound();renderMix();renderRec();uiClip();uiTransport();S.dirty=true}
@@ -908,9 +918,9 @@ const DB={db:null,open(){if(this.db)return Promise.resolve(this.db);return new P
 const bufIds=new WeakMap();let saveT=null;
 function save(){clearTimeout(saveT);saveT=setTimeout(doSave,1200)}
 async function doSave(){if(S.recording){save();return}try{const bufs={};const tracks=S.tracks.map(t=>({...t,clips:t.clips.map(c=>{if(c.kind!=='audio')return c;let id=bufIds.get(c.buf);if(!id){id=uid();bufIds.set(c.buf,id)}if(!bufs[id]){const chs=[];for(let i=0;i<c.buf.numberOfChannels;i++)chs.push(c.buf.getChannelData(i));bufs[id]={sr:c.buf.sampleRate,chs}}const{buf,...rest}=c;return{...rest,bufId:id}})}));
- await DB.put('project',{v:1,bpm:S.bpm,bars:S.bars,metro:S.metro,countIn:S.countIn,loopMode:S.loopMode,loopA:S.loopA,loopB:S.loopB,padSens:S.padSens,autoQ:S.autoQ,qGrid:S.qGrid,qStr:S.qStr,autoTempo:S.autoTempo,lowLat:S.lowLat,th:TH,liveMode:S.liveMode,arrH:S.arrH,beatGrid:S.beatGrid,mastering:S.mastering,masterVol:S.masterVol,revType:S.revType,latMs:S.latMs,inGainV:S.inGainV,a4:S.a4,micId:S.micId,selTrack:S.selTrack,tracks,bufs})}catch(e){console.warn('opslaan',e)}}
+ await DB.put('project',{v:1,bpm:S.bpm,bars:S.bars,metro:S.metro,countIn:S.countIn,loopMode:S.loopMode,loopA:S.loopA,loopB:S.loopB,padSens:S.padSens,autoQ:S.autoQ,qGrid:S.qGrid,qStr:S.qStr,autoTempo:S.autoTempo,bufMode:S.bufMode,outId:S.outId,th:TH,liveMode:S.liveMode,arrH:S.arrH,beatGrid:S.beatGrid,mastering:S.mastering,masterVol:S.masterVol,revType:S.revType,latMs:S.latMs,inGainV:S.inGainV,a4:S.a4,micId:S.micId,selTrack:S.selTrack,tracks,bufs})}catch(e){console.warn('opslaan',e)}}
 async function load(){try{const p=await DB.get('project');if(!p||!p.tracks)return false;const bufs={};for(const id in p.bufs){const b=p.bufs[id];const ab=new AudioBuffer({length:b.chs[0].length,numberOfChannels:b.chs.length,sampleRate:b.sr});b.chs.forEach((d,i)=>ab.copyToChannel(d,i));bufs[id]=ab;bufIds.set(ab,id)}
- Object.assign(S,{bpm:p.bpm,bars:p.bars,metro:p.metro,countIn:p.countIn,loopMode:!!p.loopMode,loopA:p.loopA||0,loopB:p.loopB||0,padSens:p.padSens==null?.7:p.padSens,autoQ:p.autoQ!==false,qGrid:p.qGrid||'16',qStr:p.qStr==null?1:p.qStr,autoTempo:p.autoTempo!==false,lowLat:p.lowLat!==false,th:p.th||64,liveMode:!!p.liveMode,arrH:p.arrH||0,beatGrid:p.beatGrid||'16',mastering:p.mastering,masterVol:p.masterVol,revType:p.revType||'studio',latMs:p.latMs,inGainV:p.inGainV||1.5,a4:p.a4||440,micId:p.micId||''});
+ Object.assign(S,{bpm:p.bpm,bars:p.bars,metro:p.metro,countIn:p.countIn,loopMode:!!p.loopMode,loopA:p.loopA||0,loopB:p.loopB||0,padSens:p.padSens==null?.7:p.padSens,autoQ:p.autoQ!==false,qGrid:p.qGrid||'16',qStr:p.qStr==null?1:p.qStr,autoTempo:p.autoTempo!==false,bufMode:p.bufMode||'auto',outId:p.outId||'',th:p.th||64,liveMode:!!p.liveMode,arrH:p.arrH||0,beatGrid:p.beatGrid||'16',mastering:p.mastering,masterVol:p.masterVol,revType:p.revType||'studio',latMs:p.latMs,inGainV:p.inGainV==null||p.inGainV===1.5?1:p.inGainV,a4:p.a4||440,micId:p.micId||''});
  S.tracks=p.tracks.map(t=>({...t,clips:t.clips.map(c=>{if(c.kind!=='audio')return c;const{bufId,...rest}=c;return{...rest,buf:bufs[bufId]}}).filter(c=>c.kind!=='audio'||c.buf)}));S.selTrack=trackById(p.selTrack)?p.selTrack:S.tracks[0]&&S.tracks[0].id;return true}catch(e){console.warn('laden',e);return false}}
 function defaultProject(){S.tracks=[];S.bpm=90;S.bars=8;S.pos=0;S.sel=null;const a=newTrack('audio');S.tracks.push(a);const d=newTrack('inst','drums');S.tracks.push(d);const p=newTrack('inst','piano');S.tracks.push(p);const b=newTrack('inst','bass');b.name='Bas';S.tracks.push(b);S.selTrack=a.id;S.lastInst=d.id;if(ctx)S.tracks.forEach(getNodes)}
 
@@ -920,7 +930,11 @@ function frame(){requestAnimationFrame(frame);
  if(S.playing){S.dirty=true;const w=cv.clientWidth,px=nowPos()*S.zoom-S.scrollX;if(px>w*.88&&!drag)S.scrollX+=w*.6;if(px<0&&nowPos()>=0&&!drag)S.scrollX=Math.max(0,nowPos()*S.zoom-40)}
  const tnow=performance.now();if(S.dirty&&(!S.playing||tnow-lastDraw>32)){S.dirty=false;lastDraw=tnow;drawTL();$('#headsIn').style.transform=`translateY(${-S.scrollY}px)`}updateTime();
  if(S.tab==='beat')beatPlayhead();
- if(M)meter(M.an,$('#mMeter'));if(mic.an&&mic.stream&&S.tab==='rec'){meter(mic.an,$('#inMeter'));tunerTick()}}
+ if(M)meter(M.an,$('#mMeter'));if(mic.an&&mic.stream&&S.tab==='rec'){meter(mic.an,$('#inMeter'));clipCheck();tunerTick()}else if(mic.an&&mic.stream&&S.recording)clipCheck(true)}
+let clipT=0,clipMsg='',clipToast=0;
+function clipCheck(quiet){let pk;if(quiet){mic.an.getFloatTimeDomainData(mbuf);pk=0;for(let i=0;i<mbuf.length;i++)pk=Math.max(pk,Math.abs(mbuf[i]))}else pk=($('#inMeter')||{})._pk||0;const raw=pk/Math.max(.01,S.inGainV),now=performance.now();
+ if(raw>.97){clipT=now;clipMsg='De microfoon raakt overstuurd – houd de tablet verder van de gitaar of speel zachter.'}else if(pk>.98){clipT=now;clipMsg='Te hard – zet het ingangsniveau lager.'}
+ if(now-clipT<1500){const w=$('#clipWarn');if(w)w.textContent=clipMsg;if(S.recording&&now-clipToast>6000){clipToast=now;toast(clipMsg,3000)}}else{const w=$('#clipWarn');if(w&&w.textContent)w.textContent=''}}
 new ResizeObserver(()=>{S.dirty=true}).observe($('#lane'));
 (()=>{const sp=$('#split'),ar=$('#arrange');let on=false;sp.addEventListener('pointerdown',e=>{on=true;sp.setPointerCapture(e.pointerId)});sp.addEventListener('pointermove',e=>{if(!on)return;const h=clamp(e.clientY-ar.getBoundingClientRect().top,140,window.innerHeight-220);ar.style.flex=`0 0 ${h}px`;S.arrH=h;S.dirty=true});const up=()=>{if(on){on=false;save()}};sp.addEventListener('pointerup',up);sp.addEventListener('pointercancel',up)})();
 document.addEventListener('visibilitychange',()=>{if(document.hidden)doSave()});
